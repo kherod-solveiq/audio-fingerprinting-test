@@ -68,32 +68,40 @@
 
     <div class="test-section">
         <h2>Audio Context Fingerprint Test</h2>
+        <p><strong>What this tests:</strong> Audio fingerprinting often starts by profiling your browser's AudioContext properties. Websites can create a unique "fingerprint" by measuring sample rates, latency values, and timing precision.</p>
+        <p><strong>What to look for:</strong></p>
+        <ul>
+            <li><strong>Sample Rate Variations:</strong> Should vary slightly (47999, 48000, 48001) instead of always being identical</li>
+            <li><strong>Current Time Variations:</strong> Should show small timing differences across test runs</li>
+            <li><strong>Without Protection:</strong> These values would be identical every time, making you trackable</li>
+            <li><strong>With Protection:</strong> Values vary slightly, making consistent fingerprinting impossible</li>
+        </ul>
         <button onclick="testAudioContext()">Run Audio Context Test</button>
-        <div id="audiocontext-result" class="test-result"></div>
+        <div id="audiocontext-result" class="test-result">Click "Run Audio Context Test" to check if audio frequency generation is being protected.</div>
     </div>
 
     <div class="test-section">
         <h2>Oscillator Fingerprint Test</h2>
         <button onclick="testOscillator()">Run Oscillator Test</button>
-        <div id="oscillator-result" class="test-result"></div>
+        <div id="oscillator-result" class="test-result">Click "Run Oscillator Test" to check if audio frequency generation is being protected.</div>
     </div>
 
     <div class="test-section">
         <h2>Audio Analysis Test</h2>
         <button onclick="testAudioAnalysis()">Run Analysis Test</button>
-        <div id="analysis-result" class="test-result"></div>
+        <div id="analysis-result" class="test-result">Click "Run Analysis Test" to verify that audio analysis data has protective noise injection.</div>
     </div>
 
     <div class="test-section">
         <h2>Dynamics Compressor Test</h2>
         <button onclick="testCompressor()">Run Compressor Test</button>
-        <div id="compressor-result" class="test-result"></div>
+        <div id="compressor-result" class="test-result">Click "Run Compressor Test" to see if audio compressor parameters are being randomized.</div>
     </div>
 
     <div class="test-section">
         <h2>Consistency Test (Run Multiple Times)</h2>
         <button onclick="runConsistencyTest()">Test Consistency</button>
-        <div id="consistency-result" class="test-result"></div>
+        <div id="consistency-result" class="test-result">Click "Test Consistency" to run multiple iterations and detect fingerprinting protection across all audio systems.</div>
     </div>
 
     <script>
@@ -123,132 +131,142 @@
             for (let i = 0; i < 5; i++) {
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 
+                // Add small delay to let currentTime advance
+                setTimeout(() => {
+                    results.push({
+                        run: i + 1,
+                        sampleRate: audioContext.sampleRate,
+                        destination: audioContext.destination.channelCount,
+                        state: audioContext.state,
+                        baseLatency: audioContext.baseLatency || 'not available',
+                        outputLatency: audioContext.outputLatency || 'not available',
+                        currentTime: parseFloat(audioContext.currentTime.toFixed(8)) // More precision
+                    });
+                    
+                    audioContext.close();
+                    
+                    // When all tests complete, analyze results
+                    if (results.length === 5) {
+                        // Check for variations
+                        const sampleRates = results.map(r => r.sampleRate);
+                        const currentTimes = results.map(r => r.currentTime);
+                        const uniqueSampleRates = [...new Set(sampleRates)];
+                        const uniqueCurrentTimes = [...new Set(currentTimes)];
+                        
+                        const sampleRateVarying = uniqueSampleRates.length > 1;
+                        const currentTimeVarying = uniqueCurrentTimes.length > 1;
+                        
+                        result.innerHTML = `Audio Context Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nSample rate variation detected: ${sampleRateVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nCurrent time variation detected: ${currentTimeVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
+                    }
+                }, i * 10); // Small staggered delay
+            }
+        }
+
+        // Test oscillator frequency variations - UPDATED VERSION
+        function testOscillator() {
+            const result = document.getElementById('oscillator-result');
+            const results = [];
+            
+            // Test multiple oscillators to see frequency variations
+            for (let i = 0; i < 5; i++) {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                
+                // Set frequency and capture what actually gets stored
+                oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+                
                 results.push({
                     run: i + 1,
-                    sampleRate: audioContext.sampleRate,
-                    destination: audioContext.destination.channelCount,
-                    state: audioContext.state,
-                    baseLatency: audioContext.baseLatency || 'not available',
-                    outputLatency: audioContext.outputLatency || 'not available',
-                    currentTime: parseFloat(audioContext.currentTime.toFixed(6))
+                    requestedFreq: 440,
+                    actualStoredFreq: parseFloat(oscillator.frequency.value.toFixed(3)),
+                    oscillatorType: oscillator.type
                 });
                 
                 audioContext.close();
             }
             
             // Check for variations
-            const sampleRates = results.map(r => r.sampleRate);
-            const currentTimes = results.map(r => r.currentTime);
-            const uniqueSampleRates = [...new Set(sampleRates)];
-            const uniqueCurrentTimes = [...new Set(currentTimes)];
+            const frequencies = results.map(r => r.actualStoredFreq);
+            const uniqueFreqs = [...new Set(frequencies)];
+            const isVarying = uniqueFreqs.length > 1;
             
-            const sampleRateVarying = uniqueSampleRates.length > 1;
-            const currentTimeVarying = uniqueCurrentTimes.length > 1;
-            
-            result.innerHTML = `Audio Context Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nSample rate variation detected: ${sampleRateVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nCurrent time variation detected: ${currentTimeVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
-        }
-
-        // Test oscillator frequency variations
-        function testOscillator() {
-            const result = document.getElementById('oscillator-result');
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            
-            const oscillator = audioContext.createOscillator();
-            const originalSetValueAtTime = oscillator.frequency.setValueAtTime;
-            
-            let intercepted = false;
-            oscillator.frequency.setValueAtTime = function(value, startTime) {
-                intercepted = true;
-                return originalSetValueAtTime.call(this, value, startTime);
-            };
-            
-            // Test frequency setting
-            oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-            
-            const testResults = {
-                frequencyValue: oscillator.frequency.value,
-                intercepted: intercepted,
-                type: oscillator.type
-            };
-            
-            result.innerHTML = `Oscillator Test Results:\n${JSON.stringify(testResults, null, 2)}`;
-            audioContext.close();
+            result.innerHTML = `Oscillator Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nUnique frequencies: ${JSON.stringify(uniqueFreqs)}\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
         }
 
         // Test audio analysis with noise injection
-        async function testAudioAnalysis() {
+        function testAudioAnalysis() {
             const result = document.getElementById('analysis-result');
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const results = [];
             
-            // Create offline context for consistent testing
-            const offlineContext = new OfflineAudioContext(1, 44100, 44100);
-            const oscillator = offlineContext.createOscillator();
-            const analyser = offlineContext.createAnalyser();
-            
-            oscillator.connect(analyser);
-            analyser.connect(offlineContext.destination);
-            
-            oscillator.frequency.setValueAtTime(440, 0);
-            oscillator.start(0);
-            
-            try {
-                const buffer = await offlineContext.startRendering();
-                const data = buffer.getChannelData(0);
+            // Test multiple analyzers to see data variations
+            for (let i = 0; i < 3; i++) {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
                 
-                // Create analyser for frequency analysis
-                const testAnalyser = audioContext.createAnalyser();
-                const frequencyData = new Uint8Array(testAnalyser.frequencyBinCount);
-                const timeData = new Uint8Array(testAnalyser.fftSize);
+                const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+                const timeData = new Uint8Array(analyser.fftSize);
                 
-                testAnalyser.getByteFrequencyData(frequencyData);
-                testAnalyser.getByteTimeDomainData(timeData);
+                analyser.getByteFrequencyData(frequencyData);
+                analyser.getByteTimeDomainData(timeData);
                 
-                const testResults = {
-                    bufferLength: buffer.length,
-                    sampleData: Array.from(data.slice(0, 10)),
-                    frequencyBinCount: testAnalyser.frequencyBinCount,
-                    fftSize: testAnalyser.fftSize,
+                results.push({
+                    run: i + 1,
+                    frequencyBinCount: analyser.frequencyBinCount,
+                    fftSize: analyser.fftSize,
                     frequencyDataSample: Array.from(frequencyData.slice(0, 10)),
                     timeDataSample: Array.from(timeData.slice(0, 10))
-                };
+                });
                 
-                result.innerHTML = `Audio Analysis Test:\n${JSON.stringify(testResults, null, 2)}`;
-            } catch (error) {
-                result.innerHTML = `Error in audio analysis: ${error.message}`;
+                audioContext.close();
             }
             
-            audioContext.close();
+            // Check for variations in the data
+            const timeDataSamples = results.map(r => JSON.stringify(r.timeDataSample));
+            const frequencyDataSamples = results.map(r => JSON.stringify(r.frequencyDataSample));
+            
+            const timeDataVarying = new Set(timeDataSamples).size > 1;
+            const frequencyDataVarying = new Set(frequencyDataSamples).size > 1;
+            
+            // Also check if time data has the expected noise variations
+            const allTimeValues = results.flatMap(r => r.timeDataSample);
+            const uniqueTimeValues = [...new Set(allTimeValues)];
+            const hasTimeVariations = uniqueTimeValues.length > 1;
+            
+            result.innerHTML = `Audio Analysis Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nTime data variations across runs: ${timeDataVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nFrequency data variations across runs: ${frequencyDataVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nTime data value variations: ${hasTimeVariations ? 'YES (Protected)' : 'NO (Not Protected)'}\nUnique time values found: ${JSON.stringify(uniqueTimeValues.sort())}`;
         }
 
         // Test dynamics compressor fingerprinting
         function testCompressor() {
             const result = document.getElementById('compressor-result');
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const results = [];
             
-            const compressor = audioContext.createDynamicsCompressor();
+            // Test multiple compressors to see parameter variations
+            for (let i = 0; i < 5; i++) {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const compressor = audioContext.createDynamicsCompressor();
+                
+                // Set threshold and capture what actually gets stored
+                compressor.threshold.setValueAtTime(-24, audioContext.currentTime);
+                
+                results.push({
+                    run: i + 1,
+                    requestedThreshold: -24,
+                    actualThreshold: parseFloat(compressor.threshold.value.toFixed(4)),
+                    knee: compressor.knee.value,
+                    ratio: compressor.ratio.value,
+                    attack: compressor.attack.value,
+                    release: compressor.release.value
+                });
+                
+                audioContext.close();
+            }
             
-            // Test threshold setting
-            const originalSetValue = compressor.threshold.setValueAtTime;
-            let intercepted = false;
+            // Check for variations in threshold values
+            const thresholds = results.map(r => r.actualThreshold);
+            const uniqueThresholds = [...new Set(thresholds)];
+            const isVarying = uniqueThresholds.length > 1;
             
-            compressor.threshold.setValueAtTime = function(value, startTime) {
-                intercepted = true;
-                return originalSetValue.call(this, value, startTime);
-            };
-            
-            compressor.threshold.setValueAtTime(-24, audioContext.currentTime);
-            
-            const testResults = {
-                threshold: compressor.threshold.value,
-                knee: compressor.knee.value,
-                ratio: compressor.ratio.value,
-                attack: compressor.attack.value,
-                release: compressor.release.value,
-                intercepted: intercepted
-            };
-            
-            result.innerHTML = `Compressor Test Results:\n${JSON.stringify(testResults, null, 2)}`;
-            audioContext.close();
+            result.innerHTML = `Compressor Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nUnique thresholds: ${JSON.stringify(uniqueThresholds)}\nThreshold variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
         }
 
         // Test consistency across multiple runs
