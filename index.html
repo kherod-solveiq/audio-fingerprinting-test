@@ -117,18 +117,35 @@
         // Test basic AudioContext properties
         function testAudioContext() {
             const result = document.getElementById('audiocontext-result');
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const results = [];
             
-            const fingerprint = {
-                sampleRate: audioContext.sampleRate,
-                destination: audioContext.destination.channelCount,
-                state: audioContext.state,
-                baseLatency: audioContext.baseLatency || 'not available',
-                outputLatency: audioContext.outputLatency || 'not available'
-            };
+            // Test multiple contexts to see property variations
+            for (let i = 0; i < 5; i++) {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                results.push({
+                    run: i + 1,
+                    sampleRate: audioContext.sampleRate,
+                    destination: audioContext.destination.channelCount,
+                    state: audioContext.state,
+                    baseLatency: audioContext.baseLatency || 'not available',
+                    outputLatency: audioContext.outputLatency || 'not available',
+                    currentTime: parseFloat(audioContext.currentTime.toFixed(6))
+                });
+                
+                audioContext.close();
+            }
             
-            result.innerHTML = `Audio Context Fingerprint:\n${JSON.stringify(fingerprint, null, 2)}`;
-            audioContext.close();
+            // Check for variations
+            const sampleRates = results.map(r => r.sampleRate);
+            const currentTimes = results.map(r => r.currentTime);
+            const uniqueSampleRates = [...new Set(sampleRates)];
+            const uniqueCurrentTimes = [...new Set(currentTimes)];
+            
+            const sampleRateVarying = uniqueSampleRates.length > 1;
+            const currentTimeVarying = uniqueCurrentTimes.length > 1;
+            
+            result.innerHTML = `Audio Context Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nSample rate variation detected: ${sampleRateVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nCurrent time variation detected: ${currentTimeVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
         }
 
         // Test oscillator frequency variations
@@ -244,64 +261,96 @@
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioContext.createOscillator();
                 
-                // Intercept the actual value passed to setValueAtTime
-                let actualValuePassed = null;
-                const originalSetValue = oscillator.frequency.setValueAtTime;
-                oscillator.frequency.setValueAtTime = function(value, startTime) {
-                    actualValuePassed = value; // Capture the actual value being set
-                    return originalSetValue.call(this, value, startTime);
-                };
-                
-                // Request 440Hz
+                // DON'T intercept setValueAtTime - let the protection work first
+                // Just call setValueAtTime and check if the frequency value changes
                 oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+                
+                // Check the actual frequency value after our protection has potentially modified it
+                const actualFrequency = oscillator.frequency.value;
                 
                 results.push({
                     run: i + 1,
                     requestedFreq: 440,
-                    actualValuePassed: actualValuePassed,
-                    storedValue: oscillator.frequency.value,
-                    sampleRate: audioContext.sampleRate
+                    actualStoredValue: actualFrequency,
+                    sampleRate: audioContext.sampleRate,
+                    currentTime: audioContext.currentTime
                 });
                 
-                interceptedValues.push(actualValuePassed);
+                interceptedValues.push(actualFrequency);
                 audioContext.close();
             }
             
-            // Check if the actual values passed to setValueAtTime vary
-            const uniqueValues = [...new Set(interceptedValues)];
+            // Check if the stored frequency values vary (indicating protection worked)
+            const uniqueValues = [...new Set(interceptedValues.map(v => v.toFixed(3)))]; // Round to 3 decimal places
             const isVarying = uniqueValues.length > 1;
             
-            // Also test analyser data consistency
+            // Also test analyser data consistency with a more realistic test
             const analyserResults = testAnalyserConsistency();
             
-            result.innerHTML = `Consistency Test Results:\n${JSON.stringify(results, null, 2)}\n\nFrequency values passed to setValueAtTime:\n${JSON.stringify(interceptedValues, null, 2)}\n\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\n\n${analyserResults}`;
+            // Test sample rate variations
+            const sampleRates = results.map(r => r.sampleRate);
+            const uniqueSampleRates = [...new Set(sampleRates)];
+            const sampleRateVarying = uniqueSampleRates.length > 1;
             
-            if (isVarying) {
+            // Test currentTime variations
+            const currentTimes = results.map(r => r.currentTime.toFixed(6));
+            const uniqueCurrentTimes = [...new Set(currentTimes)];
+            const currentTimeVarying = uniqueCurrentTimes.length > 1;
+            
+            result.innerHTML = `Consistency Test Results:\n${JSON.stringify(results, null, 2)}\n\nFrequency values stored:\n${JSON.stringify(interceptedValues.map(v => v.toFixed(3)), null, 2)}\n\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nSample rate variation detected: ${sampleRateVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nCurrent time variation detected: ${currentTimeVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\n\n${analyserResults}`;
+            
+            if (isVarying || sampleRateVarying || currentTimeVarying) {
                 result.classList.add('fingerprint');
             }
         }
         
-        // Helper function to test analyser data consistency
+        // Helper function to test analyser data consistency with actual audio
         function testAnalyserConsistency() {
             const samples = [];
             
-            for (let i = 0; i < 3; i++) {
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const analyser = audioContext.createAnalyser();
+            try {
+                for (let i = 0; i < 3; i++) {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const analyser = audioContext.createAnalyser();
+                    const oscillator = audioContext.createOscillator();
+                    
+                    // Create actual audio to analyze
+                    oscillator.connect(analyser);
+                    oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+                    oscillator.start();
+                    
+                    // Let it run briefly to generate data
+                    setTimeout(() => {
+                        const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+                        analyser.getByteFrequencyData(frequencyData);
+                        
+                        // Take first 10 values as sample
+                        samples.push(Array.from(frequencyData.slice(0, 10)));
+                        
+                        oscillator.stop();
+                        audioContext.close();
+                    }, 50);
+                }
                 
-                const frequencyData = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteFrequencyData(frequencyData);
+                // Wait for all samples to complete
+                setTimeout(() => {
+                    if (samples.length >= 3) {
+                        // Check if any samples differ
+                        const firstSample = JSON.stringify(samples[0]);
+                        const isAnalyserVarying = samples.some(sample => JSON.stringify(sample) !== firstSample);
+                        
+                        const resultDiv = document.getElementById('consistency-result');
+                        if (resultDiv) {
+                            resultDiv.innerHTML += `\n\nAnalyser Data Samples:\n${JSON.stringify(samples, null, 2)}\nAnalyser variation detected: ${isAnalyserVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
+                        }
+                    }
+                }, 200);
                 
-                // Take first 5 values as sample
-                samples.push(Array.from(frequencyData.slice(0, 5)));
-                audioContext.close();
+                return 'Analyser test running asynchronously...';
+                
+            } catch (error) {
+                return `Analyser test error: ${error.message}`;
             }
-            
-            // Check if any samples differ
-            const firstSample = JSON.stringify(samples[0]);
-            const isAnalyserVarying = samples.some(sample => JSON.stringify(sample) !== firstSample);
-            
-            return `Analyser Data Samples:\n${JSON.stringify(samples, null, 2)}\nAnalyser variation detected: ${isAnalyserVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
         }
 
         // Initialize on load
