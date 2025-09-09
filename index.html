@@ -291,51 +291,64 @@
             const result = document.getElementById('consistency-result');
             const results = [];
             const interceptedValues = [];
+            let completedTests = 0;
             
             for (let i = 0; i < 5; i++) {
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioContext.createOscillator();
                 
-                // DON'T intercept setValueAtTime - let the protection work first
-                // Just call setValueAtTime and check if the frequency value changes
-                oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-                
-                // Check the actual frequency value after our protection has potentially modified it
-                const actualFrequency = oscillator.frequency.value;
-                
-                results.push({
-                    run: i + 1,
-                    requestedFreq: 440,
-                    actualStoredValue: actualFrequency,
-                    sampleRate: audioContext.sampleRate,
-                    currentTime: audioContext.currentTime
-                });
-                
-                interceptedValues.push(actualFrequency);
-                audioContext.close();
-            }
-            
-            // Check if the stored frequency values vary (indicating protection worked)
-            const uniqueValues = [...new Set(interceptedValues.map(v => v.toFixed(3)))]; // Round to 3 decimal places
-            const isVarying = uniqueValues.length > 1;
-            
-            // Also test analyser data consistency with a more realistic test
-            const analyserResults = testAnalyserConsistency();
-            
-            // Test sample rate variations
-            const sampleRates = results.map(r => r.sampleRate);
-            const uniqueSampleRates = [...new Set(sampleRates)];
-            const sampleRateVarying = uniqueSampleRates.length > 1;
-            
-            // Test currentTime variations
-            const currentTimes = results.map(r => r.currentTime.toFixed(6));
-            const uniqueCurrentTimes = [...new Set(currentTimes)];
-            const currentTimeVarying = uniqueCurrentTimes.length > 1;
-            
-            result.innerHTML = `Consistency Test Results:\n${JSON.stringify(results, null, 2)}\n\nFrequency values stored:\n${JSON.stringify(interceptedValues.map(v => v.toFixed(3)), null, 2)}\n\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nSample rate variation detected: ${sampleRateVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nCurrent time variation detected: ${currentTimeVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\n\n${analyserResults}`;
-            
-            if (isVarying || sampleRateVarying || currentTimeVarying) {
-                result.classList.add('fingerprint');
+                // Let protection initialize first, then capture the modified values
+                setTimeout(() => {
+                    let capturedFrequency = 440;
+                    
+                    // Add our capturing on top of the protection's override
+                    const currentSetValue = oscillator.frequency.setValueAtTime;
+                    oscillator.frequency.setValueAtTime = function(value, startTime) {
+                        capturedFrequency = value; // Capture modified value from protection
+                        return currentSetValue.call(this, value, startTime);
+                    };
+                    
+                    oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+                    
+                    results.push({
+                        run: i + 1,
+                        requestedFreq: 440,
+                        actualValuePassed: parseFloat(capturedFrequency.toFixed(3)),
+                        actualStoredValue: oscillator.frequency.value,
+                        sampleRate: audioContext.sampleRate,
+                        currentTime: audioContext.currentTime
+                    });
+                    
+                    interceptedValues.push(capturedFrequency);
+                    audioContext.close();
+                    completedTests++;
+                    
+                    // When all tests complete, analyze results
+                    if (completedTests === 5) {
+                        // Check if the actual values passed to setValueAtTime vary
+                        const uniqueValues = [...new Set(interceptedValues.map(v => v.toFixed(3)))];
+                        const isVarying = uniqueValues.length > 1;
+                        
+                        // Test sample rate variations
+                        const sampleRates = results.map(r => r.sampleRate);
+                        const uniqueSampleRates = [...new Set(sampleRates)];
+                        const sampleRateVarying = uniqueSampleRates.length > 1;
+                        
+                        // Test currentTime variations
+                        const currentTimes = results.map(r => r.currentTime.toFixed(6));
+                        const uniqueCurrentTimes = [...new Set(currentTimes)];
+                        const currentTimeVarying = uniqueCurrentTimes.length > 1;
+                        
+                        // Also test analyser data consistency with a more realistic test
+                        const analyserResults = testAnalyserConsistency();
+                        
+                        result.innerHTML = `Consistency Test Results:\n${JSON.stringify(results, null, 2)}\n\nFrequency values passed to setValueAtTime:\n${JSON.stringify(interceptedValues.map(v => v.toFixed(3)), null, 2)}\n\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nSample rate variation detected: ${sampleRateVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\nCurrent time variation detected: ${currentTimeVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\n\n${analyserResults}`;
+                        
+                        if (isVarying || sampleRateVarying || currentTimeVarying) {
+                            result.classList.add('fingerprint');
+                        }
+                    }
+                }, 15 + (i * 10)); // Staggered delays to let protection initialize
             }
         }
         
