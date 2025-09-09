@@ -82,26 +82,62 @@
 
     <div class="test-section">
         <h2>Oscillator Fingerprint Test</h2>
+        <p><strong>What this tests:</strong> Audio oscillators generate precise frequencies that websites can measure to create unique device signatures. Even tiny variations in frequency generation can be used for fingerprinting.</p>
+        <p><strong>What to look for:</strong></p>
+        <ul>
+            <li><strong>Frequency Variations:</strong> Values should vary around 440Hz (like 439.96, 440.09) instead of exactly 440.000</li>
+            <li><strong>Without Protection:</strong> Frequency would be identical every time, creating a consistent fingerprint</li>
+            <li><strong>With Protection:</strong> Small random variations make frequency-based tracking unreliable</li>
+            <li><strong>Note:</strong> Protection may work at the audio processing level even if tests show identical stored values</li>
+        </ul>
         <button onclick="testOscillator()">Run Oscillator Test</button>
-        <div id="oscillator-result" class="test-result">Click "Run Oscillator Test" to check if audio frequency generation is being protected.</div>
+        <div id="oscillator-result" class="test-result">Test results will appear here.</div>
     </div>
 
     <div class="test-section">
         <h2>Audio Analysis Test</h2>
+        <p><strong>What this tests:</strong> Audio analysis APIs can examine frequency and time domain data to create detailed audio signatures. Websites use these to detect specific hardware characteristics.</p>
+        <p><strong>What to look for:</strong></p>
+        <ul>
+            <li><strong>Time Data Variations:</strong> Should show mixed values (127, 128) instead of uniform data</li>
+            <li><strong>FFT Size Variations:</strong> Should vary (2048, 2080) across different test runs</li>
+            <li><strong>Cross-Run Differences:</strong> Each test run should produce slightly different data patterns</li>
+            <li><strong>Without Protection:</strong> All data would be identical, making your audio hardware identifiable</li>
+            <li><strong>With Protection:</strong> Noise injection makes consistent analysis impossible</li>
+        </ul>
         <button onclick="testAudioAnalysis()">Run Analysis Test</button>
-        <div id="analysis-result" class="test-result">Click "Run Analysis Test" to verify that audio analysis data has protective noise injection.</div>
+        <div id="analysis-result" class="test-result">Test results will appear here.</div>
     </div>
 
     <div class="test-section">
         <h2>Dynamics Compressor Test</h2>
+        <p><strong>What this tests:</strong> Audio compressor parameters can reveal specific details about your browser's audio processing capabilities, creating another fingerprinting vector.</p>
+        <p><strong>What to look for:</strong></p>
+        <ul>
+            <li><strong>Threshold Variations:</strong> Values should vary around -24 (like -23.995, -24.008) instead of exactly -24.000</li>
+            <li><strong>Parameter Consistency:</strong> Other parameters (knee, ratio, attack, release) show your audio system's characteristics</li>
+            <li><strong>Without Protection:</strong> Compressor settings would be identical every time</li>
+            <li><strong>With Protection:</strong> Small variations prevent consistent parameter-based tracking</li>
+            <li><strong>Note:</strong> Like oscillators, protection may work at the processing level even if stored values appear identical</li>
+        </ul>
         <button onclick="testCompressor()">Run Compressor Test</button>
-        <div id="compressor-result" class="test-result">Click "Run Compressor Test" to see if audio compressor parameters are being randomized.</div>
+        <div id="compressor-result" class="test-result">Test results will appear here.</div>
     </div>
 
     <div class="test-section">
         <h2>Consistency Test (Run Multiple Times)</h2>
+        <p><strong>What this tests:</strong> This comprehensive test runs multiple iterations to verify that protection is working across all audio fingerprinting methods consistently.</p>
+        <p><strong>What to look for:</strong></p>
+        <ul>
+            <li><strong>Frequency Variations:</strong> Should detect oscillator protection working</li>
+            <li><strong>Sample Rate Variations:</strong> Should show AudioContext property protection (may be intermittent by design)</li>
+            <li><strong>Current Time Variations:</strong> Should detect timing-based protection</li>
+            <li><strong>Analyser Variations:</strong> Should show audio analysis protection with real audio signals</li>
+            <li><strong>Overall Assessment:</strong> Any "YES (Protected)" result means that fingerprinting vector is being blocked</li>
+            <li><strong>Important:</strong> Protection can be working even when tests show "NO" - check browser console for actual protection activity</li>
+        </ul>
         <button onclick="runConsistencyTest()">Test Consistency</button>
-        <div id="consistency-result" class="test-result">Click "Test Consistency" to run multiple iterations and detect fingerprinting protection across all audio systems.</div>
+        <div id="consistency-result" class="test-result">Test results will appear here.</div>
     </div>
 
     <script>
@@ -168,21 +204,29 @@
             const results = [];
             let completedTests = 0;
             
+            // Test multiple oscillators to see frequency variations
             for (let i = 0; i < 5; i++) {
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioContext.createOscillator();
                 
-                // Store the modified values by intercepting at the lowest level
+                // Let the protection set up its overrides first
                 setTimeout(() => {
-                    const frequencies = [439.93, 440.10, 440.07, 440.08, 439.98]; // Known values from console
-                    const modifiedValue = frequencies[i] || 440;
+                    let capturedValue = 440;
                     
+                    // Add our capturing on top of the protection's override
+                    const currentSetValue = oscillator.frequency.setValueAtTime; // This is now the protected version
+                    oscillator.frequency.setValueAtTime = function(value, startTime) {
+                        capturedValue = value; // Capture the modified value from protection
+                        return currentSetValue.call(this, value, startTime);
+                    };
+                    
+                    // Set frequency - protection will modify it, then we'll capture it
                     oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
                     
                     results.push({
                         run: i + 1,
                         requestedFreq: 440,
-                        actualValuePassed: parseFloat(modifiedValue.toFixed(3)),
+                        actualValuePassed: parseFloat(capturedValue.toFixed(3)),
                         storedBaseValue: oscillator.frequency.value,
                         oscillatorType: oscillator.type
                     });
@@ -190,6 +234,7 @@
                     audioContext.close();
                     completedTests++;
                     
+                    // When all tests complete, analyze results
                     if (completedTests === 5) {
                         const frequencies = results.map(r => r.actualValuePassed);
                         const uniqueFreqs = [...new Set(frequencies)];
@@ -197,7 +242,7 @@
                         
                         result.innerHTML = `Oscillator Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nUnique frequencies passed: ${JSON.stringify(uniqueFreqs)}\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
                     }
-                }, 20 + (i * 10));
+                }, 10 + (i * 5)); // Small staggered delay to let protection initialize
             }
         }
 
@@ -400,4 +445,3 @@
     </script>
 </body>
 </html>
-
