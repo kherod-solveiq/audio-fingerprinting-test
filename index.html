@@ -96,6 +96,12 @@
         <div id="consistency-result" class="test-result"></div>
     </div>
 
+    <div class="test-section">
+        <h2>Extension Proxy Test</h2>
+        <button onclick="testExtensionProxy()">Test Extension Proxy</button>
+        <div id="proxy-result" class="test-result"></div>
+    </div>
+
     <script>
         // Check if protection is active
         function checkProtectionStatus() {
@@ -267,6 +273,24 @@
             }
         }
 
+        function testExtensionProxy() {
+            const result = document.getElementById('proxy-result');
+            
+            try {
+                console.log('Testing AudioContext creation from page...');
+                const ctx = new AudioContext();
+                console.log('AudioContext created successfully');
+                result.innerHTML = `AudioContext created successfully:\n${JSON.stringify({
+                    sampleRate: ctx.sampleRate,
+                    state: ctx.state
+                }, null, 2)}`;
+                ctx.close();
+            } catch (error) {
+                console.error('AudioContext creation failed:', error);
+                result.innerHTML = `Error: ${error.message}`;
+            }
+        }
+
         // Initialize on load
         setTimeout(checkProtectionStatus, 1000);
 
@@ -275,3 +299,4 @@
     </script>
 </body>
 </html>
+
