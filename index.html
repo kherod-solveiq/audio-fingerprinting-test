@@ -162,44 +162,52 @@
             }
         }
 
-        // Test oscillator frequency variations - FIXED VERSION
+        // Test oscillator frequency variations - FIXED to capture protected values
         function testOscillator() {
             const result = document.getElementById('oscillator-result');
             const results = [];
+            let completedTests = 0;
             
             // Test multiple oscillators to see frequency variations
             for (let i = 0; i < 5; i++) {
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioContext.createOscillator();
                 
-                // Capture the actual value passed to setValueAtTime (after protection modifies it)
-                let capturedValue = 440; // Default if not captured
-                const originalSetValue = oscillator.frequency.setValueAtTime;
-                oscillator.frequency.setValueAtTime = function(value, startTime) {
-                    capturedValue = value; // This captures the modified value from protection
-                    return originalSetValue.call(this, value, startTime);
-                };
-                
-                // Set frequency - this will trigger our protection first, then our capture
-                oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-                
-                results.push({
-                    run: i + 1,
-                    requestedFreq: 440,
-                    actualValuePassed: parseFloat(capturedValue.toFixed(3)),
-                    storedBaseValue: oscillator.frequency.value,
-                    oscillatorType: oscillator.type
-                });
-                
-                audioContext.close();
+                // Let the protection set up its overrides first
+                setTimeout(() => {
+                    let capturedValue = 440;
+                    
+                    // Add our capturing on top of the protection's override
+                    const currentSetValue = oscillator.frequency.setValueAtTime; // This is now the protected version
+                    oscillator.frequency.setValueAtTime = function(value, startTime) {
+                        capturedValue = value; // Capture the modified value from protection
+                        return currentSetValue.call(this, value, startTime);
+                    };
+                    
+                    // Set frequency - protection will modify it, then we'll capture it
+                    oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+                    
+                    results.push({
+                        run: i + 1,
+                        requestedFreq: 440,
+                        actualValuePassed: parseFloat(capturedValue.toFixed(3)),
+                        storedBaseValue: oscillator.frequency.value,
+                        oscillatorType: oscillator.type
+                    });
+                    
+                    audioContext.close();
+                    completedTests++;
+                    
+                    // When all tests complete, analyze results
+                    if (completedTests === 5) {
+                        const frequencies = results.map(r => r.actualValuePassed);
+                        const uniqueFreqs = [...new Set(frequencies)];
+                        const isVarying = uniqueFreqs.length > 1;
+                        
+                        result.innerHTML = `Oscillator Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nUnique frequencies passed: ${JSON.stringify(uniqueFreqs)}\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
+                    }
+                }, 10 + (i * 5)); // Small staggered delay to let protection initialize
             }
-            
-            // Check for variations in the actual values passed
-            const frequencies = results.map(r => r.actualValuePassed);
-            const uniqueFreqs = [...new Set(frequencies)];
-            const isVarying = uniqueFreqs.length > 1;
-            
-            result.innerHTML = `Oscillator Test Results (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nUnique frequencies passed: ${JSON.stringify(uniqueFreqs)}\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
         }
 
         // Test audio analysis with noise injection
