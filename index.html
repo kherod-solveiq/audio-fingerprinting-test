@@ -96,19 +96,13 @@
         <div id="consistency-result" class="test-result"></div>
     </div>
 
-    <div class="test-section">
-        <h2>Extension Proxy Test</h2>
-        <button onclick="testExtensionProxy()">Test Extension Proxy</button>
-        <div id="proxy-result" class="test-result"></div>
-    </div>
-
     <script>
         // Check if protection is active
         function checkProtectionStatus() {
             const protectionDiv = document.getElementById('fp-protection');
             const statusIndicator = document.getElementById('status-indicator');
             const statusText = document.getElementById('status-text');
-
+            
             if (protectionDiv && protectionDiv.dataset.enabled === 'true') {
                 statusIndicator.className = 'status protected';
                 statusIndicator.textContent = 'PROTECTED';
@@ -124,7 +118,7 @@
         function testAudioContext() {
             const result = document.getElementById('audiocontext-result');
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
+            
             const fingerprint = {
                 sampleRate: audioContext.sampleRate,
                 destination: audioContext.destination.channelCount,
@@ -132,7 +126,7 @@
                 baseLatency: audioContext.baseLatency || 'not available',
                 outputLatency: audioContext.outputLatency || 'not available'
             };
-
+            
             result.innerHTML = `Audio Context Fingerprint:\n${JSON.stringify(fingerprint, null, 2)}`;
             audioContext.close();
         }
@@ -141,25 +135,25 @@
         function testOscillator() {
             const result = document.getElementById('oscillator-result');
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
+            
             const oscillator = audioContext.createOscillator();
             const originalSetValueAtTime = oscillator.frequency.setValueAtTime;
-
+            
             let intercepted = false;
             oscillator.frequency.setValueAtTime = function(value, startTime) {
                 intercepted = true;
                 return originalSetValueAtTime.call(this, value, startTime);
             };
-
+            
             // Test frequency setting
             oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-
+            
             const testResults = {
                 frequencyValue: oscillator.frequency.value,
                 intercepted: intercepted,
                 type: oscillator.type
             };
-
+            
             result.innerHTML = `Oscillator Test Results:\n${JSON.stringify(testResults, null, 2)}`;
             audioContext.close();
         }
@@ -168,30 +162,30 @@
         async function testAudioAnalysis() {
             const result = document.getElementById('analysis-result');
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
+            
             // Create offline context for consistent testing
             const offlineContext = new OfflineAudioContext(1, 44100, 44100);
             const oscillator = offlineContext.createOscillator();
             const analyser = offlineContext.createAnalyser();
-
+            
             oscillator.connect(analyser);
             analyser.connect(offlineContext.destination);
-
+            
             oscillator.frequency.setValueAtTime(440, 0);
             oscillator.start(0);
-
+            
             try {
                 const buffer = await offlineContext.startRendering();
                 const data = buffer.getChannelData(0);
-
+                
                 // Create analyser for frequency analysis
                 const testAnalyser = audioContext.createAnalyser();
                 const frequencyData = new Uint8Array(testAnalyser.frequencyBinCount);
                 const timeData = new Uint8Array(testAnalyser.fftSize);
-
+                
                 testAnalyser.getByteFrequencyData(frequencyData);
                 testAnalyser.getByteTimeDomainData(timeData);
-
+                
                 const testResults = {
                     bufferLength: buffer.length,
                     sampleData: Array.from(data.slice(0, 10)),
@@ -200,12 +194,12 @@
                     frequencyDataSample: Array.from(frequencyData.slice(0, 10)),
                     timeDataSample: Array.from(timeData.slice(0, 10))
                 };
-
+                
                 result.innerHTML = `Audio Analysis Test:\n${JSON.stringify(testResults, null, 2)}`;
             } catch (error) {
                 result.innerHTML = `Error in audio analysis: ${error.message}`;
             }
-
+            
             audioContext.close();
         }
 
@@ -213,20 +207,20 @@
         function testCompressor() {
             const result = document.getElementById('compressor-result');
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
+            
             const compressor = audioContext.createDynamicsCompressor();
-
+            
             // Test threshold setting
             const originalSetValue = compressor.threshold.setValueAtTime;
             let intercepted = false;
-
+            
             compressor.threshold.setValueAtTime = function(value, startTime) {
                 intercepted = true;
                 return originalSetValue.call(this, value, startTime);
             };
-
+            
             compressor.threshold.setValueAtTime(-24, audioContext.currentTime);
-
+            
             const testResults = {
                 threshold: compressor.threshold.value,
                 knee: compressor.knee.value,
@@ -235,7 +229,7 @@
                 release: compressor.release.value,
                 intercepted: intercepted
             };
-
+            
             result.innerHTML = `Compressor Test Results:\n${JSON.stringify(testResults, null, 2)}`;
             audioContext.close();
         }
@@ -244,59 +238,77 @@
         function runConsistencyTest() {
             const result = document.getElementById('consistency-result');
             const results = [];
-
+            const interceptedValues = [];
+            
             for (let i = 0; i < 5; i++) {
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioContext.createOscillator();
-
+                
+                // Intercept the actual value passed to setValueAtTime
+                let actualValuePassed = null;
+                const originalSetValue = oscillator.frequency.setValueAtTime;
+                oscillator.frequency.setValueAtTime = function(value, startTime) {
+                    actualValuePassed = value; // Capture the actual value being set
+                    return originalSetValue.call(this, value, startTime);
+                };
+                
+                // Request 440Hz
                 oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-
+                
                 results.push({
                     run: i + 1,
-                    sampleRate: audioContext.sampleRate,
-                    frequency: oscillator.frequency.value,
-                    currentTime: audioContext.currentTime
+                    requestedFreq: 440,
+                    actualValuePassed: actualValuePassed,
+                    storedValue: oscillator.frequency.value,
+                    sampleRate: audioContext.sampleRate
                 });
-
+                
+                interceptedValues.push(actualValuePassed);
                 audioContext.close();
             }
-
-            // Check if results vary (indicating protection is working)
-            const frequencies = results.map(r => r.frequency);
-            const uniqueFrequencies = [...new Set(frequencies)];
-            const isVarying = uniqueFrequencies.length > 1;
-
-            result.innerHTML = `Consistency Test (${results.length} runs):\n${JSON.stringify(results, null, 2)}\n\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
-
+            
+            // Check if the actual values passed to setValueAtTime vary
+            const uniqueValues = [...new Set(interceptedValues)];
+            const isVarying = uniqueValues.length > 1;
+            
+            // Also test analyser data consistency
+            const analyserResults = testAnalyserConsistency();
+            
+            result.innerHTML = `Consistency Test Results:\n${JSON.stringify(results, null, 2)}\n\nFrequency values passed to setValueAtTime:\n${JSON.stringify(interceptedValues, null, 2)}\n\nFrequency variation detected: ${isVarying ? 'YES (Protected)' : 'NO (Not Protected)'}\n\n${analyserResults}`;
+            
             if (isVarying) {
                 result.classList.add('fingerprint');
             }
         }
-
-        function testExtensionProxy() {
-            const result = document.getElementById('proxy-result');
+        
+        // Helper function to test analyser data consistency
+        function testAnalyserConsistency() {
+            const samples = [];
             
-            try {
-                console.log('Testing AudioContext creation from page...');
-                const ctx = new AudioContext();
-                console.log('AudioContext created successfully');
-                result.innerHTML = `AudioContext created successfully:\n${JSON.stringify({
-                    sampleRate: ctx.sampleRate,
-                    state: ctx.state
-                }, null, 2)}`;
-                ctx.close();
-            } catch (error) {
-                console.error('AudioContext creation failed:', error);
-                result.innerHTML = `Error: ${error.message}`;
+            for (let i = 0; i < 3; i++) {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
+                
+                const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(frequencyData);
+                
+                // Take first 5 values as sample
+                samples.push(Array.from(frequencyData.slice(0, 5)));
+                audioContext.close();
             }
+            
+            // Check if any samples differ
+            const firstSample = JSON.stringify(samples[0]);
+            const isAnalyserVarying = samples.some(sample => JSON.stringify(sample) !== firstSample);
+            
+            return `Analyser Data Samples:\n${JSON.stringify(samples, null, 2)}\nAnalyser variation detected: ${isAnalyserVarying ? 'YES (Protected)' : 'NO (Not Protected)'}`;
         }
 
         // Initialize on load
         setTimeout(checkProtectionStatus, 1000);
-
+        
         // Recheck protection status periodically
         setInterval(checkProtectionStatus, 5000);
     </script>
 </body>
 </html>
-
